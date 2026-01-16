@@ -1,0 +1,64 @@
+from pyrogram import Client, filters
+from datetime import datetime, timedelta
+import os
+from PIL import Image
+
+API_ID = int(os.getenv("33443590"))
+API_HASH = os.getenv("bbe8f1ae1d14c689b0f2f9378691893d")
+BOT_TOKEN = os.getenv("8035638246:AAHVuWIiFmp-91Vj8aHV5eb7B6JDiFOPbak")
+ADMIN_ID = int(os.getenv("9361457050"))
+
+app = Client("RenameBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+DAILY_FILE_LIMIT = 13
+user_usage = {}
+
+THUMB_DIR = "thumbnails"
+os.makedirs(THUMB_DIR, exist_ok=True)
+
+def reset_limit(user_id):
+    if user_id not in user_usage:
+        user_usage[user_id] = {"count": 0, "time": datetime.now()}
+    elif datetime.now() - user_usage[user_id]["time"] > timedelta(days=1):
+        user_usage[user_id] = {"count": 0, "time": datetime.now()}
+
+@app.on_message(filters.photo)
+async def save_thumbnail(client, message):
+    user_id = message.from_user.id
+    path = f"{THUMB_DIR}/{user_id}.jpg"
+    await client.download_media(message.photo, file_name=path)
+    Image.open(path).convert("RGB").save(path)
+    await message.reply_text("✅ Thumbnail saved")
+
+@app.on_message(filters.document | filters.video | filters.audio)
+async def rename_file(client, message):
+    user_id = message.from_user.id
+
+    if user_id != ADMIN_ID:
+        reset_limit(user_id)
+        if user_usage[user_id]["count"] >= DAILY_FILE_LIMIT:
+            await message.reply_text("❌ Daily limit reached (13 files)")
+            return
+
+    file = message.document or message.video or message.audio
+
+    if file.file_size > 4 * 1024 * 1024 * 1024:
+        await message.reply_text("❌ File size > 4GB")
+        return
+
+    await message.reply_text("✏️ New file name அனுப்புங்க:")
+    name_msg = await client.listen(message.chat.id)
+
+    file_path = await client.download_media(file)
+    new_path = os.path.join(os.path.dirname(file_path), name_msg.text)
+    os.rename(file_path, new_path)
+
+    thumb = f"{THUMB_DIR}/{user_id}.jpg"
+    thumb = thumb if os.path.exists(thumb) else None
+
+    await message.reply_document(new_path, thumb=thumb)
+
+    if user_id != ADMIN_ID:
+        user_usage[user_id]["count"] += 1
+
+app.run()
